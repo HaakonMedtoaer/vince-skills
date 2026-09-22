@@ -1,0 +1,9 @@
+{
+  "name": "vince",
+  "description": "Lookup skills for Vince products and Infor M3 business areas, for consultants",
+  "version": "1.0.0",
+  "author": {
+    "name": "Haakon Skaga",
+    "email": "haakon.skaga@vince.no"
+  }
+}

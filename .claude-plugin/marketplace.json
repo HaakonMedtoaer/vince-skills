@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "vince-skills",
+  "description": "Vince AS consultant skills: Vince Live, VXL, Peppol, App Builder, VSE, VBU, and Infor M3 business-area knowledge",
+  "owner": {
+    "name": "Haakon Skaga",
+    "email": "haakon.skaga@vince.no"
+  },
+  "plugins": [
+    {
+      "name": "vince",
+      "source": "./plugins/vince",
+      "description": "Lookup skills for Vince products and Infor M3 business areas, for consultants",
+      "version": "1.0.0"
+    }
+  ]
+}
