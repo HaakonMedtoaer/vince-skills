@@ -1,47 +1,44 @@
 ---
 name: vince-generic-filter-step
-description: Confirmed JSON shape and structural limits of the Vince Live GENERIC_FILTER workflow step (target workflow-generic-filter). Use whenever drafting or reviewing a Vince Live workflow that needs to filter trigger rows before an M3 call, whenever someone asks "how do I filter which rows go to M3" or "would this GENERIC_FILTER JSON work," or whenever a workflow seems to need per-record conditional logic — this skill also explains why GENERIC_FILTER often can't do what people expect and when to reach for the pipeline path instead.
+description: Confirmed JSON shape and structural limits of the Vince Live GENERIC_FILTER workflow step (target workflow-generic-filter). Use when a workflow must keep or drop trigger rows before an M3 call, when asked "how do I filter which rows go to M3" or "would this GENERIC_FILTER JSON work", or when a design expects a filter to act on data an M3 call returned — this skill explains why it can't.
 ---
 
-# GENERIC_FILTER step
+# `GENERIC_FILTER` step
 
-`type: "GENERIC_FILTER"`, `target: "workflow-generic-filter"`.
+`type: "GENERIC_FILTER"`, `target: "workflow-generic-filter"`. Shape captured from a real tenant
+workflow.
 
-## Confirmed config shape
-
-`definition.stepConfig[stepId]` holds:
+## Shape
 
 ```
-{
-  "all": [
-    { "fact": ..., "operator": ..., "value": ..., "source": ..., "from": ... }
-  ]
-}
+{ "all": [ { "fact": …, "operator": …, "value": …, "source": …, "from": … } ] }
 ```
 
-`all[]` is a list of condition objects, each with `fact`, `operator`, `value`, `source`, `from`. This is the full confirmed shape — do not invent additional fields (e.g. an `"any"` sibling for OR-logic, extra comparison operators, or a `not` flag) unless you've seen them in a real capture. If you need OR-logic and only `all[]` is confirmed, flag that as an open question rather than guessing a shape.
+That is the whole confirmed shape. Don't add an `any` sibling for OR logic, a `not` flag or extra
+fields without a capture; if a design needs OR logic, flag it as open.
 
-## Templating language: double-brace
+Values reference upstream data with **double braces**, e.g. `{{ header.Filter_A }}` — not JSONata
+(Transforms) and not full Handlebars (`EMAIL`).
 
-`GENERIC_FILTER` values reference upstream data with double-brace syntax, e.g. `{{ header.Filter_A }}`. This is one of three distinct templating languages used across a Vince Live workflow:
+## What it can't do
 
-- `GENERIC_FILTER` → double-brace `{{ header.Filter_A }}`
-- `TRANSFORMER_MORPH` → JSONata (see `vince-transform-step`)
-- `EMAIL` → triple-brace / Handlebars, including block helpers (see `vince-email-step`)
+From VinceForge's captured reference (`anthropic-skills:vince-live-workflow`):
 
-Don't mix these up when drafting — using JSONata syntax inside a `GENERIC_FILTER` value, or vice versa, is a real class of mistake worth flagging in review.
+- It sees only **raw trigger rows**, never the output of an M3 call.
+- It runs **once, before the whole M3 step** — there's no per-call variant.
 
-## The structural limitation that matters most
+So "look something up in M3, then filter on the result" is outside this step entirely — use a JSONata
+Transform in the pipeline path (`vince-native-vs-pipeline-decision`). A design that puts
+`GENERIC_FILTER` after a bulk read to filter its results is structurally wrong.
 
-Per the `anthropic-skills:vince-live-workflow` skill (a peer confirmed-facts source, cross-referenced in this project's `CLAUDE.md`):
+## Operators
 
-- `GENERIC_FILTER` only ever sees **raw trigger rows** — it cannot see output from an earlier M3 call.
-- It **always runs once**, before the whole M3 step — there's no per-call or per-batch filtering variant.
-- It structurally **cannot filter on a value an earlier M3 call produced.**
+The `operator` values seen in captures aren't enumerated here. Vince's product documentation lists
+Equal, Not Equal, Less Than, Greater Than, Less Than Equal and Greater Than Equal, with data types
+Number, String and Boolean — a documentation claim, not a capture. Note that it sits uneasily with the
+rule that comparison gates need the pipeline; flag it if a design depends on either.
 
-This means: if the brief needs "call M3 to look something up, then filter based on what came back," `GENERIC_FILTER` cannot do it — that's not a config mistake, it's the step's boundary. Any of these three needs (per-call filtering, `>`/`<` gating, filtering on an earlier M3 result) forces the Transform/`GENERIC_API` pipeline path instead of the native `API` step + `GENERIC_FILTER` combination. See `vince-native-vs-pipeline-decision` for the full decision rule, and `vince-m3-native-api-step` for what the native path looks like when `GENERIC_FILTER` alone is sufficient (simple trigger-row filtering only).
+## Not known
 
-## When to reach for this skill
-
-- Drafting a workflow where trigger-submitted rows need a simple keep/drop condition before an M3 call.
-- Reviewing a spec that claims `GENERIC_FILTER` will filter on an M3 API's own response — flag this as structurally wrong per above, and suggest the pipeline path instead.
+- The `operator` values that appear in real captures.
+- Whether any OR logic exists.

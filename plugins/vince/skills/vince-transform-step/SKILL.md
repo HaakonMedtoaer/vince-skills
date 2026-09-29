@@ -1,41 +1,50 @@
 ---
 name: vince-transform-step
-description: Confirmed JSONata patterns and context-reading rules for the TRANSFORMER_MORPH workflow step (target workflow-transform) — the reshaping step between a trigger/API call and whatever consumes its output. Use whenever drafting or reviewing a Transform step's JSONata template, debugging why a step can't find data from a previous step, or asked to write JSONata for a Vince Live workflow.
+description: Confirmed JSONata patterns and context-reading rules for the Vince Live TRANSFORMER_MORPH workflow step (target workflow-transform), the step that reshapes data between a trigger or API call and whatever consumes it. Use when writing or reviewing a Transform's JSONata, when a step can't find data from an earlier step, or when asked to write JSONata for a Vince Live workflow.
 ---
 
-## What this is
+# `TRANSFORMER_MORPH` (Transform) step
 
-`type: "TRANSFORMER_MORPH"`, `target: "workflow-transform"`. Config: `template` (a JSONata string) and `trimAll`. This is the step that reshapes data between everything else — building request bodies before a `GENERIC_API`/native `API` call, and reading responses back afterward.
+`type: "TRANSFORMER_MORPH"`, `target: "workflow-transform"`. Config: `template` (a JSONata string) and
+`trimAll`. Captured from real tenant workflows.
 
-**`definitionAsl` is compiled by the platform — never hand-author it.** You write `template`; the platform compiles the executable form.
+`definitionAsl` is compiled by the platform from the workflow — never write it by hand.
 
-## Reading context: the rules that actually matter
+## Reading context
 
-- A prior step's output: `$context.data.all.<stepId>.body.results.records`
-- Trigger input: `$context.data.trigger.body.<field>`
-- **Exception**: `GENERIC_API` steps nest one level deeper (`body.body`) — see `vince-generic-api-step` for why. Don't apply that exception to non-REST steps.
+- An earlier step: `$context.data.all.<stepId>.body.results.records` — e.g. a REST step is read as
+  `$context.data.all.rest_api_1.body.results.records`, exactly as the captured workflow does.
+- Trigger input: `$context.data.trigger.body.<field>`.
+- The shorthand `body`/`header` means the previous step's output; after a `GENERIC_API` step that
+  shorthand nests one level deeper (`body.body`). This applies to the shorthand only.
 
-## Confirmed JSONata patterns seen in real production workflows
+## JSONata seen in live workflows
 
-This is the richest body of confirmed detail in the project — worth knowing the specific patterns rather than treating JSONata as a black box:
+- `$map`, including a fan-out emitting `{program, maxReturnedRecords, transactions: [...]}` for one
+  batched `GENERIC_API` call
+- variable binding: `$data := $context.data.trigger.body[0]`
+- `$map(records, function($v, $i){ … })` with an index
+- ternaries `cond ? a : b`, and `cond ? {…} : undefined`
+- multi-statement blocks: `;`-separated bindings inside `( … )`
+- comments `/* … */`
+- `$distinct`, `$merge`, `$keys`, `$lookup`, `$split`
+- indexed iteration to skip a header row: `records#$i[$i > 0]`
+- user-defined functions bound with `:=` (e.g. a reusable `$formatDate`)
 
-- **`$map`** for reshaping arrays, including fan-shaped batching that emits `{program, maxReturnedRecords, transactions: [...]}` for a single `GENERIC_API` call carrying N M3 transactions.
-- **Variable binding**: `$data := $context.data.trigger.body[0]`
-- **`$map` with an index parameter**: `$map(records, function($v, $i){ ... })`
-- **Inline ternaries**: `cond ? a : b`
-- **Multi-statement blocks**: `;`-separated bindings inside `(...)`
-- **Comments**: `/* like this */`
-- **`$distinct`, `$merge`, `$keys`, `$lookup`**
-- **Indexed iteration to skip a header row**: `records#$i[$i>0]`
-- **Nested nullable ternaries**: `cond ? {...} : undefined`
-- **User-defined functions**: bound with `:=`, e.g. a reusable `$formatDate` closure
+Vince Live's runtime hasn't been checked against the full JSONata spec, so treat features outside this
+list as unconfirmed until you've seen them work.
 
-None of these are guesses — each has been observed in a real customer workflow. If you need a JSONata feature not on this list, treat it as unconfirmed for this platform until you've seen it used, even if it's valid JSONata in general — Vince Live's own transform runtime hasn't been checked against the full JSONata spec.
+## A shared idiom
 
-## A recurring idiom worth reusing, not reinventing
+Several unrelated customers unpack `EXPORTMI`/`Select` output with the same `$split`/`$map`/`$merge`
+snippet — reuse it (`vince-exportmi-select-step`).
 
-Several independent customers use the **identical** `$split`/`$map`/`$merge` snippet to unpack the `REPL`-string output of an `EXPORTMI`/`Select` bulk read — strong evidence this is a semi-standard, copy-pasted idiom at Vince rather than something to derive from scratch each time. See `vince-exportmi-select-step` for the full shape of that pattern; reach for the same idiom rather than writing a new one.
+## Other steps use other languages
 
-## Templating language varies by step — don't cross-apply
+`GENERIC_FILTER` values use double braces (`{{ header.Filter_A }}`); `EMAIL` uses full Handlebars
+(`{{{body.subject}}}`, `{{#if}}`, `{{#each}}`). Don't write JSONata in them.
 
-JSONata is Transform's language only. `GENERIC_FILTER` uses double-brace Handlebars-lite (`{{ header.Filter_A }}`), `EMAIL` uses full Handlebars including triple-brace value interpolation and block helpers (`{{{body.subject}}}`, `{{#if}}`/`{{#each}}`). Three different templating languages appear across one workflow — see `vince-generic-filter-step` and `vince-email-step` for those, rather than assuming JSONata syntax works there.
+## Not known
+
+- What `trimAll` does exactly.
+- Which JSONata version the runtime implements.

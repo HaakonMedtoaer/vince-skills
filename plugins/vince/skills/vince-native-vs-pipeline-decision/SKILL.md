@@ -1,53 +1,43 @@
 ---
 name: vince-native-vs-pipeline-decision
-description: Use whenever deciding how an M3 read or write should be implemented in a Vince Live workflow — the native API step vs. the Transform/GENERIC_API pipeline. Trigger on "should this be an API step or GENERIC_API", "which M3 call pattern should I use here", "why do all the real customer workflows use Transform+REST instead of the native step", or any moment about to design a new M3-touching step from scratch.
+description: The decision rule for implementing an M3 read or write in a Vince Live workflow — the native API step versus the Transform → GENERIC_API → Transform pipeline. Use whenever designing a new M3-touching step, when asked "should this be an API step or GENERIC_API" or "why do real customer workflows use Transform+REST", or when reviewing a design that picked one path without saying why.
 ---
 
-# Native `API` step vs. `GENERIC_API` pipeline — the decision rule
+# Native `API` step vs. the `GENERIC_API` pipeline
 
-Two confirmed, real ways to call M3 from a Vince Live workflow exist side by side:
-- the native `API` step (see `vince-m3-native-api-step`)
-- the `GENERIC_API` Transform → REST → Transform pipeline (see `vince-generic-api-step`)
+Both are real, confirmed ways to call M3:
 
-Every real customer workflow reviewed so far (Homewerks, Europris, 10009-Voice, and
-`operations-workflow.txt` itself) uses the pipeline. That's not an accident — it's because the pipeline
-can do things the native step structurally cannot. Don't default to the pipeline out of habit, though;
-ask the questions below and pick deliberately.
+- **Native** — an `API` step (`m3_api_1`), optionally with a `GENERIC_FILTER` before it and an `EXCEL`
+  after it. See `vince-m3-native-api-step`.
+- **Pipeline** — Transform builds the request → `GENERIC_API` posts it to M3's REST gateway →
+  Transform reads the result. See `vince-generic-api-step`.
 
-## Ask these questions, in order
+Every live customer workflow reviewed so far (Homewerks, Europris, 10009 - Voice, and a captured
+production workflow) uses the pipeline. That's a consequence of their requirements, not a rule —
+decide per workflow.
 
-**1. Does this need to filter rows on a value an earlier M3 call produced in this same run?**
-If yes → pipeline, full stop. `GENERIC_FILTER` (the native path's only filtering mechanism) only ever
-sees raw trigger rows, runs exactly once, and runs *before* the M3 step — it structurally cannot see
-anything an M3 call returned. There is no native-path way around this.
+## Ask in order
 
-**2. Does this need a numeric or date comparison gate (`>`, `<`, date-after, date-before)?**
-If yes → pipeline. The native path's field validation is existence/type/mandatory-shape checking, not
-comparison logic. Comparison gating belongs in a JSONata Transform or a `GENERIC_FILTER` `operator`
-(see `vince-generic-filter-step`), both of which are pipeline-side.
+1. **Must it filter on a value an earlier M3 call returned in this run?** → pipeline. `GENERIC_FILTER`
+   sees only raw trigger rows and runs once, before the whole M3 step.
+2. **Must it gate on a numeric or date comparison (`>`, `<`, before/after)?** → pipeline, with the
+   comparison in a JSONata Transform.
+3. **Must it skip or vary individual calls per row?** → pipeline, e.g. `skipIfExpression` on the REST
+   step — the field name is confirmed; its behaviour is the customer's description, so test it if it's
+   load-bearing.
+4. **None of the above?** → prefer native: automatic pagination, stricter save-time validation, and
+   per-field metadata that catches wrong field names before the workflow runs. It's also less JSON to
+   write by hand. Writing results to a spreadsheet (`EXCEL`) requires native.
 
-**3. Does this need per-call filtering that varies per row (e.g. skip this specific API call for this
-specific item)?**
-If yes → pipeline, using `skipIfExpression` on the REST step (see `vince-generic-api-step`) —
-note that field's *behavior* is customer-claimed, not independently verified executing, so test it if
-this is load-bearing.
+Rules 1–2 come from VinceForge's captured reference (`anthropic-skills:vince-live-workflow`).
 
-**4. None of the above — is this a straightforward "read/write these transactions" case?**
-Then the native path wins on real advantages: automatic pagination, stricter save-time field
-validation, and full field-metadata lookup support (see `vince-field-metadata-lookup`) so mismatched
-field names get caught before the workflow ever runs. If the task is simple, prefer native — it's less
-JSON to hand-write and the platform validates more of it for you.
+## An unresolved contradiction — flag it, don't pick a side
 
-## Why the pipeline dominates in practice anyway
+Vince's product documentation describes an **"M3 Filter"** component that filters rows *returned by*
+an M3 API step, with operators including less-than and greater-than, and it also lists `<`/`>` for
+Generic Filter. That contradicts parts of rules 1–2. No JSON capture or `target` for M3 Filter has
+been seen. Until one is, design by the rule above and note the contradiction in the design.
 
-Real integrations are rarely "just read these transactions" — they almost always need to join M3 data
-with something else, gate on a business condition, or shape the output for a report/email. That's why
-question 1 or 2 usually fires before question 4 gets a chance to matter. Treat "the pipeline is more
-common" as an observed consequence of real requirements, not a rule to follow blindly when a genuinely
-simple case comes up.
+## Not known
 
-## What not to do
-
-Don't pick the pipeline reflexively because it's what you've seen most, and don't pick native
-reflexively because it "looks simpler" — both defaults skip the actual structural question, which is
-whether filtering/gating needs to happen *after* M3 data is already in hand.
+- The JSON shape and `target` of the documented M3 Filter component, and whether it removes the limits in rules 1–2.

@@ -1,54 +1,71 @@
 ---
 name: vince-generic-api-step
-description: Confirmed JSON shape and every known content field for the GENERIC_API workflow step (target workflow-rest-api) — the Transform/REST pipeline used to call M3's REST gateway, Vince Live's own API (custom tables, triggering another workflow), or any external REST endpoint. Use whenever drafting or reviewing a GENERIC_API / REST API step, wiring a workflow to call M3, chaining workflows together, reading or writing Custom Table rows via REST, or debugging why a REST step's output can't be found in the next Transform.
+description: Confirmed JSON shape and content fields of the Vince Live GENERIC_API workflow step (target workflow-rest-api) — the REST step used to call M3's REST gateway, Vince Live's own API (Custom Tables, triggering another workflow) or any external endpoint. Use when drafting or reviewing a REST API step, wiring a workflow to call M3 through a Transform/REST pipeline, chaining workflows, reading or writing Custom Table rows over REST, or debugging why a REST step's output can't be found in the next Transform.
 ---
 
-## What GENERIC_API is
+# `GENERIC_API` step
 
-`type: "GENERIC_API"`, `target: "workflow-rest-api"`. This is the general-purpose "make an HTTP call" step. `content` is a **JSON string** (not a nested object — it's serialized). It is used for three genuinely different things, all through the same step type:
+`type: "GENERIC_API"`, `target: "workflow-rest-api"`. The general-purpose HTTP call. Its
+`definition.stepConfig[stepId].content` is a **JSON string** — serialized, not a nested object.
 
-1. Calling M3's own REST gateway: `/infor/M3/m3api-rest/v2/execute`
-2. Calling Vince Live's **own** REST API — `api.vince.live/v1/custom-tables/...` (read/write/delete Custom Table rows directly) and `api.vince.live/live/workflows/WORKFLOW-<id>/sync` (trigger another workflow — this is how workflow chaining works; it is not a separate step type)
-3. Any other external REST endpoint the tenant needs
+Evidence: shape captured from real tenant workflows; extra fields from live customer solutions and
+VinceForge's captured reference (`anthropic-skills:vince-live-workflow`).
 
-## Confirmed `content` fields
+## `content` fields
 
-- `connectionId`
-- `endpoint` — can be a literal string, **or** a Handlebars template pulling from an earlier step, e.g. `{{ body.ionUrl }}` or `{{ $context.data.all.transform_1.ionUrl }}` (confirmed in Homewerks' auto-release workflow). This lets a workflow switch M3 environments by editing one Transform instead of every REST step.
-- `method`
-- `headers`
-- `bodyPath` — `"$"` in the confirmed M3-gateway example
-- `version: 2` — seen alongside the above in 10009 - Voice's order-lines and claim-register workflows. Not confirmed whether `version` is always present, or what other values it can take.
-- `forEach` — e.g. `"forEach": "body"` makes the call iterate once per item of the named array, instead of firing once with the whole payload (confirmed in Europris's invoice-reminder solution).
-- `skipIfExpression` — a JSONata boolean string (e.g. `"$contains(body.mail, 'Ingen Epost Funnet')"`); when true, the call is skipped for that item.
+| field | status | notes |
+|---|---|---|
+| `connectionId` | confirmed | the saved Connection that supplies auth |
+| `endpoint` | confirmed | literal URL, **or** a template from an earlier step: `"{{ body.ionUrl }}"`, `"{{ $context.data.all.transform_1.ionUrl }}"` (Homewerks) — lets one Transform switch M3 environments |
+| `method` | confirmed | |
+| `headers` | confirmed | |
+| `bodyPath` | confirmed | `"$"` in the M3-gateway calls |
+| `version` | seen | `2` on some steps (10009 - Voice). Unknown whether always present or what other values exist. Product docs call v2 beta and say its output becomes an array of `{headers, body}` |
+| `forEach` | name confirmed | e.g. `"body"`. Described (Europris) as calling once per item of that array — not observed executing |
+| `skipIfExpression` | name confirmed | JSONata boolean, e.g. `"$contains(body.mail, 'Ingen Epost Funnet')"`. Described as skipping an item when true — not observed executing |
 
-**Caveat on `forEach`/`skipIfExpression`**: only the field *names* are independently confirmed (via the peer `vince-live-workflow` skill). Their actual runtime behavior is the customer's own claim about their workflow (Europris's documentation), not something watched executing — the vendor's own doc is also inconsistent about the `version` number involved. Treat the *existence* of these fields as solid, their precise behavior as customer-claimed, not platform-verified.
+Don't add fields beyond these without a real capture.
 
-## The sandwich pattern
+## Three uses, one step type
 
-M3 is called through this step as a sandwich: a Transform builds the request body → `GENERIC_API` sends it → another Transform reads the response back. Never treat `GENERIC_API` as calling M3 directly with no Transform on either side — the real workflow this project has read always wraps it this way.
+1. **M3's REST gateway** — `/infor/M3/m3api-rest/v2/execute`.
+2. **Vince Live's own API** — `api.vince.live/v1/custom-tables/...` to read, write or delete Custom
+   Table rows; `api.vince.live/live/workflows/WORKFLOW-<id>/sync` to trigger another workflow (how
+   Europris chains three workflows). Workflow chaining has no step type of its own.
+3. **Any external REST endpoint.**
 
-## The one gotcha that will break your JSONata: `body.body`
+## Calling M3: the sandwich
 
-Every other step's output is read by the next Transform as `$context.data.all.<stepId>.body...`. **`GENERIC_API` nests its payload one level deeper** — the platform's own default transform template documents this as a stated context rule. So a REST step named `rest_api_1` is read as:
+A Transform builds the request → `GENERIC_API` posts it to the gateway → a Transform reads the result.
+Two batching shapes are both real:
+
+- **One call, N transactions:** a `$map` in the Transform emits
+  `{program, maxReturnedRecords, transactions: [...]}` (captured).
+- **One transaction per Transform→REST pair:** chosen by 10009 - Voice because the output is easier to
+  map.
+
+There is no loop step. Fan-out is a batched call or separate pairs, never N generated steps.
+
+## Reading its output
+
+In the next Transform, read the REST step by its `stepId` exactly as the captured workflow does:
 
 ```
-$context.data.all.rest_api_1.body.body.results.records
+$context.data.all.rest_api_1.body.results.records
 ```
 
-(the real workflow this project captured reads exactly `…rest_api_1.body.results.records` relative to that extra `body` nesting — don't drop it when writing the next Transform's JSONata).
+The platform's default transform template notes that the **shorthand** `body` (meaning "the previous
+step") nests one level deeper after a REST step — `body.body`. That applies to the shorthand only,
+not to the `$context.data.all.<stepId>` form above.
 
-## Batching M3 transactions: two real, equally valid patterns
+## Related
 
-**Fan-shaped batching**: a JSONata `$map` in the preceding Transform emits `{program, maxReturnedRecords, transactions: [...]}`, carrying N M3 transactions in one `GENERIC_API` call. This is real and confirmed (`operations-workflow.txt`) — anything fan-shaped like this is one batched call, never N separate steps, and never a loop (there is no loop step type).
+`vince-transform-step` (JSONata on both sides), `vince-m3-native-api-step` (the path without the
+sandwich), `vince-native-vs-pipeline-decision`, `vince-exportmi-select-step` (SQL-style reads through
+this step), `vince-custom-tables-search-api` (before paging a Custom Table over REST).
 
-**Per-transaction pairs**: splitting one transaction per Transform→REST pair — instead of one `$map` emitting several — is also a real, deliberate pattern (confirmed via 10009 - Voice's documentation), chosen specifically because it makes mapping the output easier. **Neither pattern is "the" rule** — pick based on whether per-transaction output mapping or call-count matters more for the workflow you're drafting.
+## Not known
 
-## Calling Vince Live's own API through this same step
-
-- Custom Tables: `api.vince.live/v1/custom-tables/...` for reading/writing/deleting rows directly — see `vince-table-updater-step` for the queue-pattern usage of this (read side, up to 100 rows at a time via search, delete-as-processed).
-- Triggering another workflow: `POST https://api.vince.live/live/workflows/WORKFLOW-<id>/sync` with the next workflow's payload as the body — confirmed via Europris's three-chained-workflow invoice-reminder solution. This resolved what was once described as "trigger another workflow" needing its own step type — it doesn't; it's this step pointed at Vince Live's own gateway instead of M3's.
-
-## Related skills
-
-`vince-transform-step` for the JSONata on either side of the sandwich, `vince-m3-native-api-step` for the alternative that skips the sandwich entirely, `vince-native-vs-pipeline-decision` for when to pick this path over native, `vince-exportmi-select-step` for a specific confirmed M3-gateway usage pattern (bulk SQL-style reads via `EXPORTMI`/`Select`).
+- Whether `version` is always present, and what values besides `2` exist.
+- What `forEach` and `skipIfExpression` do at run time — only their names are confirmed.
+- The exact output shape of a `version: 2` step (product docs say an array of `{headers, body}`; not captured).

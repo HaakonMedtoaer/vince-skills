@@ -1,31 +1,34 @@
 ---
 name: vince-trigger-step
-description: Use whenever building the entry point of a Vince Live workflow — a TRIGGER step with its form fields/buttons. Trigger on "how do I set up the trigger for this workflow", "what fields does the trigger step need", "how does the user kick off this app", or any question about workflow-trigger, triggerType, or the form a user fills to start a workflow.
+description: Confirmed JSON shape of the Vince Live TRIGGER workflow step (target workflow-trigger) — the entry point and the form a user fills in to start a workflow. Use when building a workflow's entry point, when asked "what fields does the trigger need" or "how does the user start this app", or for any question about triggerType or trigger form fields.
 ---
 
 # `TRIGGER` step
 
-`type: TRIGGER`, `target: workflow-trigger`. Every workflow starts here.
+`type: "TRIGGER"`, `target: "workflow-trigger"`. Every workflow starts here. Shape captured from real
+tenant workflows.
 
-## Confirmed config shape
+## Shape
 
-`definition.stepConfig[stepId]`:
-- `triggerType`
-- `title`
-- `buttonText`
-- `fields[]`
-- `formGroups[]`
+`definition.stepConfig[stepId]`: `triggerType`, `title`, `buttonText`, `fields[]`, `formGroups[]`.
 
-## Why it matters downstream
+The step tree itself carries only `type`, `name`, `stepId`, `target`, `retryAttempts`, `childSteps`;
+all configuration lives in `stepConfig`, keyed by `stepId` — true of every step type.
 
-Whatever the user submits through this step's `fields[]` becomes available to every later step as
-`$context.data.trigger.body.<field>` in JSONata (see `vince-transform-step`), or as
-`{{ header.Filter_A }}`-style double-brace references in a `GENERIC_FILTER` (see
-`vince-generic-filter-step`). Getting the field names right here is load-bearing for the entire rest
-of the workflow — every downstream reference to trigger data depends on matching these names exactly.
+## Why the field names matter
 
-## Structural note
+What the user submits becomes `$context.data.trigger.body.<field>` in JSONata
+(`vince-transform-step`) and `{{ header.<field> }}`-style references in a `GENERIC_FILTER`
+(`vince-generic-filter-step`). Every downstream reference depends on these names matching exactly.
 
-The step tree itself only carries `type`, `name`, `stepId`, `target`, `retryAttempts`, `childSteps` —
-all the real configuration above lives in `definition.stepConfig`, keyed by `stepId`, separate from
-the tree. This split holds for all ten confirmed step types, not just this one.
+## From Vince's product documentation (claims, not captures)
+
+- Triggers are Manual, Scheduled, or Events & Webhooks.
+- **Scheduled and event triggers can't take manual input** — the workflow must carry defaults for
+  everything it needs.
+
+## Not known
+
+- The full set of `triggerType` values and their JSON names.
+- The shape of an entry in `fields[]` and `formGroups[]`.
+- Event trigger conditions — the docs describe them only by example.

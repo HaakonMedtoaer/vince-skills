@@ -1,65 +1,54 @@
 ---
 name: m3-inventory-warehouse-mms-mws
-description: Explains Infor M3's Inventory Management (MMS — item master, warehouse balances, stock transactions) and Warehouse Management (MWS — picking, put-away, warehouse tasks) together, since consultants almost always need both at once. Use whenever a Vince Live workflow needs current stock levels, low-stock flags, stock-transaction reporting, or reconciling a warehouse task against an inventory movement.
+description: Explains Infor M3's Inventory Management (MMS — item master, warehouse balances, stock transactions) and Warehouse Management (MWS — picking, put-away, warehouse tasks) together, since consultants almost always need both. Use when a Vince Live workflow needs stock levels, low-stock flags or stock-transaction reporting, or must reconcile a warehouse task against an inventory movement.
 ---
 
 # M3 Inventory (MMS) and Warehouse Management (MWS)
 
-General Infor M3 functional knowledge, not tenant-specific confirmed fact. Program/transaction names
-below (e.g. `MMS200MI`) are **typical/commonly-documented across M3 implementations, not verified
-against any specific tenant's catalog.** Cross-check the exact name against the tenant's own
-`m3-api-catalog-full.json` or the `search_m3_catalog` tool before relying on it.
+General M3 functional knowledge, not tenant-specific fact. Program names below were checked against
+one Vince tenant's API catalog (2026-09); check the exact name in the tenant's own catalog and its
+fields with `vince-field-metadata-lookup` before designing against it.
 
-## What these modules are for
+## What they're for
 
-MMS owns *what an item is and how much of it exists*; MWS owns *the physical work of moving it*.
-They're covered together because almost every consulting ask ("what's our stock level," "why did this
-item's quantity change") sits at the boundary between the two: MMS has the balance, MWS has the task
-that's about to change it.
+MMS owns *what an item is and how much exists*; MWS owns *the physical work of moving it*. Most asks
+sit at the boundary: MMS holds the balance, MWS the task about to change it. Examples: item basic data
+via `MMS200MI` (`GetItmBasic`), balance identities via `MMS060MI` (`LstBalID`).
 
 ## Core structure
 
-- **Item master vs. warehouse-specific data.** The item master (MMS) holds attributes that don't vary
-  by location (description, unit of measure, item group). Warehouse-specific data (often a separate
-  "item/warehouse" record) holds things that do vary by location: reorder point, lead time, planning
-  method, and the balances themselves. A consultant asking "what's this item's reorder point" needs
-  the item/warehouse record, not the item master — the same item can have different reorder points in
-  different warehouses.
-- **Balance concepts.** Three numbers matter and are frequently conflated: **on-hand** (physically in
-  the warehouse), **allocated/reserved** (on-hand but committed to an order and not available to sell
-  or use elsewhere), and **available** (on-hand minus allocated — usually the number that actually
-  matters for "can I promise this to a customer" or "do I need to reorder"). A "low stock" report that
-  filters on on-hand instead of available will systematically under- or over-flag items.
-- **Stock transaction types.** Every balance change happens through a typed transaction (receipt, issue,
-  transfer, adjustment, count correction) that's individually logged — this transaction log is usually
-  the right source for "what changed and why," not just diffing balance snapshots over time.
-- **Warehouse tasks (MWS).** Picking and put-away are generated as tasks assigned to a warehouse
-  worker/device; completing a task is what actually creates the underlying stock transaction. If a
-  workflow needs to reconcile "the task said X" against "the inventory transaction said Y," the task
-  and the transaction are two different records that should agree but aren't the same record — a
-  discrepancy here is a real, reportable condition, not a data error to explain away.
+- **Item master vs. item/warehouse.** The item master holds what doesn't vary by location
+  (description, unit, item group). The item/warehouse record holds what does: reorder point, lead
+  time, planning method, balances. "What's the reorder point?" needs the item/warehouse record — it
+  can differ per warehouse.
+- **Three balances, often confused:** *on hand* (physically there), *allocated* (on hand but committed
+  to an order) and *available* (on hand minus allocated — usually what matters for promising or
+  reordering). A low-stock report on on-hand instead of available flags the wrong items.
+- **Stock transactions.** Every balance change is a typed, logged transaction (receipt, issue,
+  transfer, adjustment, count correction). The log answers "what changed and why" better than
+  diffing snapshots.
+- **Warehouse tasks (MWS).** Picking and put-away are tasks; completing one creates the stock
+  transaction. Task and transaction are separate records that should agree — a mismatch is a real,
+  reportable condition.
 
-## What a consultant typically needs to do here
+## Mapping work onto Vince Live
 
-- **Pull current stock levels** for a set of items/warehouses — bulk/reporting-scale read. Prefer
-  `vince-data-lake-step` or `vince-exportmi-select-step` over calling a balance-inquiry transaction
-  per item; at real item-count scale, only the bulk-SQL-style paths keep the workflow inside its
-  runtime budget.
-- **Flag low-stock items for reorder** — a bulk read of available balance vs. reorder point, filtered
-  with `GENERIC_FILTER` or a Transform, delivered via `vince-email-step` or written to a
-  `TABLE_UPDATER` queue (see `vince-table-updater-step`) if downstream processing needs to happen in
-  a separate, more frequent workflow run.
-- **Reconcile a warehouse task against an inventory transaction** — usually a bulk read of both,
-  joined and compared in a Transform; genuinely mismatched pairs are the report, not something to
-  silently drop.
+- **Current stock for many items/warehouses** — a bulk read: `vince-data-lake-step` or
+  `vince-exportmi-select-step`, not a balance transaction per item, which won't fit a run's time
+  budget at real scale.
+- **Low-stock flags** — bulk read of available vs. reorder point, filtered in a JSONata **Transform**
+  (`GENERIC_FILTER` can't see M3 output), sent by `EMAIL` or queued with `TABLE_UPDATER`
+  (`vince-table-updater-step`) for a separate, more frequent run.
+- **Task vs. transaction reconciliation** — bulk read of both, joined in a Transform; the mismatches
+  are the report.
 
-## Questions to ask before promising a specific field or transaction name
+## Ask before promising a field or transaction
 
-- Does "stock level" mean on-hand, available, or something location-specific like "available in
-  warehouse X only" — these give different numbers and the customer may mean any of them.
-- Is the reorder point itself maintained in M3 (item/warehouse record) or in an external planning
-  tool — if the latter, the workflow's read/write direction may be the opposite of what's assumed.
-- Is a "discrepancy" between task and transaction actually possible at this tenant's MWS
-  configuration, or does their setup make the two atomic (i.e. no discrepancy state can exist)?
+- Does "stock level" mean on hand, available, or available in one warehouse?
+- Is the reorder point maintained in M3 or in an external planning tool? That can reverse the
+  workflow's direction.
+- Can this tenant's MWS setup produce a task/transaction mismatch at all, or are they atomic?
 
-Confirm these with the customer or in the tenant's own catalog before committing to a workflow design.
+## Not known
+
+- A tenant's warehouse structure and balance rules, and whether its MWS setup can produce task/transaction mismatches.
